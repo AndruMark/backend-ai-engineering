@@ -88,3 +88,10 @@ Interactive OpenAPI documentation is served at `http://localhost:8000/docs`.
 - Documented adherence to custom error structures (`{"error": "Task not found"}`) vs default framework exceptions.
 - Enforced input whitespace stripping sanitization.
 - Guaranteed RFC-compliant empty-body 204 No Content response semantics.
+
+### Stage 6 (BE-02): SQLite Persistence AI vs Me Benchmark
+
+#### Comparative Findings:
+1. **Idempotent Seeding Logic**: The naive AI implementation ran raw `INSERT` queries on startup without checking `COUNT(*)`, causing seed tasks to duplicate endlessly on every server restart. The production code guards seeds with `SELECT COUNT(*) FROM tasks`.
+2. **Result Serialization**: The AI baseline returned raw SQLite tuples (`(1, 'Task', 0)`) to the client, breaking JSON schema compatibility. The production implementation uses `conn.row_factory = sqlite3.Row` and mapped Pydantic models to preserve camelCase/object contracts.
+3. **Connection Lifecycle & Resource Leaking**: The AI code omitted proper connection error handling and connection pooling closures.
