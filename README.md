@@ -66,3 +66,13 @@ Interactive OpenAPI documentation and execution UI is available at `http://local
 
 ![Swagger UI](swagger_ui_screenshot.png)
 
+
+## Stage 7: AI vs Me Benchmark
+
+### Prompt:
+> "Act as a senior backend engineer. Build an in-memory CRUD task API in Python using FastAPI. Include GET /, GET /health, GET /tasks, GET /tasks/{id}, POST /tasks with 201 and validation, PUT /tasks/{id}, and DELETE /tasks/{id} with 204. Handle 404 with custom JSON errors. Do not use external database."
+
+### Comparative Findings:
+1. **Error Response Schema**: The AI baseline relied on default `HTTPException` returning `{"detail": "Task not found"}` rather than following the required strict contract `{"error": "Task 99 not found"}`.
+2. **Defensive Input Sanitization**: The AI code lacked whitespace stripping, allowing blank title strings (`"   "`) to pass validation.
+3. **HTTP 204 Semantics**: The AI version returned a JSON message body upon deletion, violating standard RFC 204 No Content semantics. The manual implementation cleanly returns `Response(status_code=204)` with an empty body.
