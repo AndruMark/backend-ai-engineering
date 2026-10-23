@@ -1,0 +1,7 @@
+﻿.venv/
+__pycache__/
+*.pyc
+.env
+ai-version/
+*.log
+.pytest_cache/
