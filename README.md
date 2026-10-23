@@ -1,4 +1,5 @@
-﻿# Backend AI Engineering
+﻿[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+# Backend AI Engineering
 
 Production-ready backend services, foundational API architectures, and intelligent workflows built with Python and FastAPI.
 
@@ -64,3 +65,4 @@ content-type: application/json
 Interactive OpenAPI documentation and execution UI is available at `http://localhost:8000/docs`.
 
 ![Swagger UI](swagger_ui_screenshot.png)
+
