@@ -5,3 +5,5 @@ __pycache__/
 ai-version/
 *.log
 .pytest_cache/
+
+tasks.db
