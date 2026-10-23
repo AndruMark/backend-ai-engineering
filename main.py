@@ -23,7 +23,6 @@ def init_db():
     """)
     conn.commit()
 
-    # Seed 3 initial tasks only if the table is empty
     cursor.execute("SELECT COUNT(*) FROM tasks")
     count = cursor.fetchone()[0]
     if count == 0:
@@ -38,7 +37,6 @@ def init_db():
         conn.commit()
     conn.close()
 
-# Initialize database schema and seeds on startup
 init_db()
 
 app = FastAPI(
@@ -46,6 +44,11 @@ app = FastAPI(
     description="Persistent CRUD Task Management API with SQLite — Backend AI Engineering Track",
     version="2.0"
 )
+
+class TaskResponse(BaseModel):
+    id: int
+    title: str
+    done: bool
 
 @app.get("/", tags=["System"], summary="API Root Metadata")
 def read_root():
@@ -59,3 +62,26 @@ def read_root():
 @app.get("/health", tags=["System"], summary="Server Health Check")
 def health_check():
     return {"status": "ok"}
+
+@app.get("/tasks", response_model=List[TaskResponse], tags=["Tasks"], summary="Get all tasks")
+def get_all_tasks():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"id": row["id"], "title": row["title"], "done": bool(row["done"])} for row in rows]
+
+@app.get("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Get task by ID")
+def get_task(task_id: int):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"error": "Task not found"}
+        )
+    return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
