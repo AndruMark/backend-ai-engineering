@@ -1,28 +1,38 @@
-﻿[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-# Backend AI Engineering
+﻿# Backend AI Engineering
 
-Production-ready backend services, foundational API architectures, and intelligent workflows built with Python and FastAPI.
+Production-ready backend services, foundational API architectures, and persistent database layers built with Python and FastAPI.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Repository Overview
 This repository contains progressive backend engineering modules:
-- **`BE-01`**: Foundations — In-Memory RESTful CRUD API with strict HTTP status code compliance, Pydantic v2 data validation, and interactive OpenAPI documentation.
-- *(Upcoming Modules)*: Relational & Vector database persistence (PostgreSQL / pgvector), asynchronous task queues, and LLM agent tool interfaces.
+- **`BE-01`**: Foundations — In-Memory RESTful CRUD API with strict HTTP semantics, Pydantic validation, and OpenAPI documentation.
+- **`BE-02`**: Persistence — Transition to disk-backed relational storage using SQLite and raw parameterized SQL queries without breaking API contracts.
+- *(Upcoming Modules)*: Relational & Vector database persistence (PostgreSQL / pgvector), asynchronous queues, and LLM agent tool interfaces.
 
 ---
 
-## Module: BE-01 — Task Management CRUD API
+## Module: BE-02 — Persistent SQLite CRUD Task API
 
-### Architecture & Tech Stack
-- **Framework:** FastAPI
-- **Data Validation & Serialization:** Pydantic v2
-- **ASGI Server:** Uvicorn
-- **Storage:** In-Memory List (Transient State)
+### Architectural Principles: Separation of Concerns
+In this module, the storage layer was migrated from transient in-memory memory structures to a persistent SQLite database (`tasks.db`). 
+
+A key takeaway of backend engineering:
+> **APIs define the interface contract** (*what the application does*).  
+> **Databases define the persistence layer** (*where data is stored*).
+
+The client continues to send the exact same HTTP requests to the exact same endpoints. Only the underlying data access mechanism changed, guaranteeing full data persistence across application restarts.
+
+### Why SQLite?
+- **Zero Server Setup**: Operates as a self-contained, serverless embedded database engine stored inside a single file (`tasks.db`).
+- **Deterministic Reliability**: Highly resilient and acid-compliant, making it ideal for localized backend services and edge architectures.
+- **Automated Lifecycle**: Missing database files and schemas are generated on application startup, running initial seed data only when the table is empty (`COUNT(*) == 0`).
 
 ### Getting Started
 
 #### 1. Setup Environment
 ```powershell
-git clone https://github.com/<YOUR_GITHUB_USERNAME>/backend-ai-engineering.git
+git clone [https://github.com/AndruMark/backend-ai-engineering.git](https://github.com/AndruMark/backend-ai-engineering.git)
 cd backend-ai-engineering
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -33,46 +43,48 @@ pip install -r requirements.txt
 ```powershell
 uvicorn main:app --reload --port 8000
 ```
+*Note: On first startup, `tasks.db` is initialized automatically and seeded with 3 example tasks.*
 
 ### Endpoints Specification
 
-| HTTP Method | Endpoint | Description | Status Code |
+| HTTP Method | Endpoint | Underlying SQL Operation | Status Code |
 | :--- | :--- | :--- | :--- |
 | `GET` | `/` | API Root Metadata | `200 OK` |
 | `GET` | `/health` | Server Health Check probe | `200 OK` |
-| `GET` | `/tasks` | List all tasks | `200 OK` |
-| `GET` | `/tasks/{id}` | Retrieve single task by ID | `200 OK` / `404 Not Found` |
-| `POST` | `/tasks` | Create task with body validation | `201 Created` / `400 Bad Request` |
-| `PUT` | `/tasks/{id}` | Update task title or status | `200 OK` / `400 Bad Request` / `404 Not Found` |
-| `DELETE` | `/tasks/{id}` | Remove task | `204 No Content` / `404 Not Found` |
+| `GET` | `/tasks` | `SELECT id, title, done FROM tasks` | `200 OK` |
+| `GET` | `/tasks/{id}` | `SELECT id, title, done FROM tasks WHERE id = ?` | `200 OK` / `404 Not Found` |
+| `POST` | `/tasks` | `INSERT INTO tasks (title, done) VALUES (?, ?)` | `201 Created` / `400 Bad Request` |
+| `PUT` | `/tasks/{id}` | `UPDATE tasks SET title = ?, done = ? WHERE id = ?` | `200 OK` / `400 Bad Request` / `404 Not Found` |
+| `DELETE` | `/tasks/{id}` | `DELETE FROM tasks WHERE id = ?` | `204 No Content` / `404 Not Found` |
 
-### Verified cURL Sample
+### Parameterized Query Security
+All SQL execution uses parameterized placeholders (`?`) rather than string interpolation, preventing SQL injection vulnerabilities:
 
-```bash
-$ curl -i -X POST http://localhost:8000/tasks \
-    -H "Content-Type: application/json" \
-    -d '{"title":"Buy milk"}'
-
-HTTP/1.1 201 Created
-server: uvicorn
-content-length: 37
-content-type: application/json
-
-{"id":4,"title":"Buy milk","done":false}
+```python
+cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
 ```
 
-### Interactive API Documentation
-Interactive OpenAPI documentation and execution UI is available at `http://localhost:8000/docs`.
+### Visual Database Inspection (DB Browser for SQLite)
+Direct SQL execution and table inspection executed on `tasks.db`:
 
-![Swagger UI](swagger_ui_screenshot.png)
+```sql
+SELECT * FROM tasks;
+```
 
+![DB Browser for SQLite Inspection](db_browser_screenshot.png)
 
-## Stage 7: AI vs Me Benchmark
+---
 
-### Prompt:
-> "Act as a senior backend engineer. Build an in-memory CRUD task API in Python using FastAPI. Include GET /, GET /health, GET /tasks, GET /tasks/{id}, POST /tasks with 201 and validation, PUT /tasks/{id}, and DELETE /tasks/{id} with 204. Handle 404 with custom JSON errors. Do not use external database."
+## Interactive API Documentation (Swagger UI)
+Interactive OpenAPI documentation is served at `http://localhost:8000/docs`.
 
-### Comparative Findings:
-1. **Error Response Schema**: The AI baseline relied on default `HTTPException` returning `{"detail": "Task not found"}` rather than following the required strict contract `{"error": "Task 99 not found"}`.
-2. **Defensive Input Sanitization**: The AI code lacked whitespace stripping, allowing blank title strings (`"   "`) to pass validation.
-3. **HTTP 204 Semantics**: The AI version returned a JSON message body upon deletion, violating standard RFC 204 No Content semantics. The manual implementation cleanly returns `Response(status_code=204)` with an empty body.
+![Swagger UI Documentation](swagger_ui_screenshot.png)
+
+---
+
+## Technical Benchmarks & AI Rematch
+
+### Stage 7 (BE-01): In-Memory AI vs Me
+- Documented adherence to custom error structures (`{"error": "Task not found"}`) vs default framework exceptions.
+- Enforced input whitespace stripping sanitization.
+- Guaranteed RFC-compliant empty-body 204 No Content response semantics.
