@@ -45,6 +45,9 @@ app = FastAPI(
     version="2.0"
 )
 
+class TaskCreate(BaseModel):
+    title: str = Field(..., min_length=1, description="Task title cannot be empty")
+
 class TaskResponse(BaseModel):
     id: int
     title: str
@@ -85,3 +88,29 @@ def get_task(task_id: int):
             content={"error": "Task not found"}
         )
     return {"id": row["id"], "title": row["title"], "done": bool(row["done"])}
+
+@app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"], summary="Create a new task")
+def create_task(payload: TaskCreate):
+    cleaned_title = payload.title.strip()
+    if not cleaned_title:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Title is required and cannot be empty"}
+        )
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO tasks (title, done) VALUES (?, ?)",
+        (cleaned_title, 0)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+
+    new_task = {
+        "id": new_id,
+        "title": cleaned_title,
+        "done": False
+    }
+    return JSONResponse(status_code=status.HTTP_201_CREATED, content=new_task)
