@@ -1,49 +1,40 @@
 ﻿# Backend AI Engineering
 
-Production-ready backend services, foundational API architectures, and persistent database layers built with Python and FastAPI.
+Production-grade backend architectures, database migration layers, and containerized stacks built with Python, FastAPI, Docker, and PostgreSQL.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Repository Overview
-This repository contains progressive backend engineering modules:
-- **`BE-01`**: Foundations — In-Memory RESTful CRUD API with strict HTTP semantics, Pydantic validation, and OpenAPI documentation.
-- **`BE-02`**: Persistence — Transition to disk-backed relational storage using SQLite and raw parameterized SQL queries without breaking API contracts.
-- *(Upcoming Modules)*: Relational & Vector database persistence (PostgreSQL / pgvector), asynchronous queues, and LLM agent tool interfaces.
+- **`BE-01`**: In-Memory HTTP CRUD foundations and strict REST semantics.
+- **`BE-02`**: Persistent SQLite storage with parameterized SQL queries.
+- **`BE-04`**: Multi-container stack orchestration with Docker Compose, PostgreSQL server, isolated volumes, and environment secrets.
 
 ---
 
-## Module: BE-02 — Persistent SQLite CRUD Task API
+## Module: BE-04 — Containerized PostgreSQL Stack
 
-### Architectural Principles: Separation of Concerns
-In this module, the storage layer was migrated from transient in-memory memory structures to a persistent SQLite database (`tasks.db`). 
+### Architectural Principles
+This module migrates storage to an enterprise-grade relational database running inside an isolated Docker container, orchestrated alongside the FastAPI application via Docker Compose.
 
-A key takeaway of backend engineering:
-> **APIs define the interface contract** (*what the application does*).  
-> **Databases define the persistence layer** (*where data is stored*).
+Key guarantees:
+- **Unified Execution**: The entire stack (API + Database) starts with a single command: `docker compose up`.
+- **Strict Secret Segregation**: Database credentials live solely in `.env` (gitignored), documented via `.env.example`.
+- **True Persistence**: Database state survives full stack teardowns (`docker compose down`) via Docker named volumes (`taskdata`).
+- **Unbroken Contracts**: Route signatures and HTTP status codes (`200`, `201`, `204`, `400`, `404`) remain identical across memory, SQLite, and PostgreSQL.
 
-The client continues to send the exact same HTTP requests to the exact same endpoints. Only the underlying data access mechanism changed, guaranteeing full data persistence across application restarts.
+### Quickstart (One-Command Deployment)
 
-### Why SQLite?
-- **Zero Server Setup**: Operates as a self-contained, serverless embedded database engine stored inside a single file (`tasks.db`).
-- **Deterministic Reliability**: Highly resilient and acid-compliant, making it ideal for localized backend services and edge architectures.
-- **Automated Lifecycle**: Missing database files and schemas are generated on application startup, running initial seed data only when the table is empty (`COUNT(*) == 0`).
-
-### Getting Started
-
-#### 1. Setup Environment
 ```powershell
+# 1. Clone repository
 git clone [https://github.com/AndruMark/backend-ai-engineering.git](https://github.com/AndruMark/backend-ai-engineering.git)
 cd backend-ai-engineering
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
 
-#### 2. Run the Server
-```powershell
-uvicorn main:app --reload --port 8000
+# 2. Configure environment
+Copy-Item .env.example .env
+
+# 3. Launch stack
+docker compose up -d --build
 ```
-*Note: On first startup, `tasks.db` is initialized automatically and seeded with 3 example tasks.*
 
 ### Endpoints Specification
 
@@ -51,32 +42,23 @@ uvicorn main:app --reload --port 8000
 | :--- | :--- | :--- | :--- |
 | `GET` | `/` | API Root Metadata | `200 OK` |
 | `GET` | `/health` | Server Health Check probe | `200 OK` |
-| `GET` | `/tasks` | `SELECT id, title, done FROM tasks` | `200 OK` |
-| `GET` | `/tasks/{id}` | `SELECT id, title, done FROM tasks WHERE id = ?` | `200 OK` / `404 Not Found` |
-| `POST` | `/tasks` | `INSERT INTO tasks (title, done) VALUES (?, ?)` | `201 Created` / `400 Bad Request` |
-| `PUT` | `/tasks/{id}` | `UPDATE tasks SET title = ?, done = ? WHERE id = ?` | `200 OK` / `400 Bad Request` / `404 Not Found` |
-| `DELETE` | `/tasks/{id}` | `DELETE FROM tasks WHERE id = ?` | `204 No Content` / `404 Not Found` |
+| `GET` | `/tasks` | `SELECT id, title, done FROM tasks ORDER BY id ASC;` | `200 OK` |
+| `GET` | `/tasks/{id}` | `SELECT id, title, done FROM tasks WHERE id = %s;` | `200 OK` / `404 Not Found` |
+| `POST` | `/tasks` | `INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id, title, done;` | `201 Created` / `400 Bad Request` |
+| `PUT` | `/tasks/{id}` | `UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING id, title, done;` | `200 OK` / `400 Bad Request` / `404 Not Found` |
+| `DELETE` | `/tasks/{id}` | `DELETE FROM tasks WHERE id = %s RETURNING id;` | `204 No Content` / `404 Not Found` |
 
-### Parameterized Query Security
-All SQL execution uses parameterized placeholders (`?`) rather than string interpolation, preventing SQL injection vulnerabilities:
-
-```python
-cursor.execute("SELECT id, title, done FROM tasks WHERE id = ?", (task_id,))
+### Database Inspection inside Container
+```bash
+docker compose exec db psql -U postgres -d tasks -c "SELECT * FROM tasks;"
 ```
 
-### Visual Database Inspection (DB Browser for SQLite)
-Direct SQL execution and table inspection executed on `tasks.db`:
-
-```sql
-SELECT * FROM tasks;
-```
-
-![DB Browser for SQLite Inspection](db_browser_screenshot.png)
+![PostgreSQL Container Inspection](postgres_screenshot.png)
 
 ---
 
-## Interactive API Documentation (Swagger UI)
-Interactive OpenAPI documentation is served at `http://localhost:8000/docs`.
+## Interactive API Documentation
+Served at `http://localhost:8000/docs`.
 
 ![Swagger UI Documentation](swagger_ui_screenshot.png)
 
@@ -85,13 +67,9 @@ Interactive OpenAPI documentation is served at `http://localhost:8000/docs`.
 ## Technical Benchmarks & AI Rematch
 
 ### Stage 7 (BE-01): In-Memory AI vs Me
-- Documented adherence to custom error structures (`{"error": "Task not found"}`) vs default framework exceptions.
-- Enforced input whitespace stripping sanitization.
-- Guaranteed RFC-compliant empty-body 204 No Content response semantics.
+- Enforced strict custom JSON error structures over default framework exceptions.
+- Applied input whitespace sanitization to prevent empty/blank title records.
 
-### Stage 6 (BE-02): SQLite Persistence AI vs Me Benchmark
-
-#### Comparative Findings:
-1. **Idempotent Seeding Logic**: The naive AI implementation ran raw `INSERT` queries on startup without checking `COUNT(*)`, causing seed tasks to duplicate endlessly on every server restart. The production code guards seeds with `SELECT COUNT(*) FROM tasks`.
-2. **Result Serialization**: The AI baseline returned raw SQLite tuples (`(1, 'Task', 0)`) to the client, breaking JSON schema compatibility. The production implementation uses `conn.row_factory = sqlite3.Row` and mapped Pydantic models to preserve camelCase/object contracts.
-3. **Connection Lifecycle & Resource Leaking**: The AI code omitted proper connection error handling and connection pooling closures.
+### Stage 6 (BE-02): SQLite Persistence AI vs Me
+- Guarded database seeding with `SELECT COUNT(*) FROM tasks` to prevent duplicate seed rows across application restarts.
+- Structured database rows using `conn.row_factory = sqlite3.Row` for schema integrity.
