@@ -3,6 +3,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from supabase import create_client, Client
 
@@ -16,6 +17,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
 
 # Supabase Auth Client
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# OpenAPI Security Scheme for Swagger UI (Authorize Button)
+security_scheme = HTTPBearer(auto_error=False)
 
 app = FastAPI(
     title="Auth & Task API",
@@ -36,17 +40,12 @@ def auth_exception_handler(request: Request, exc: AuthException):
         content={"error": exc.error}
     )
 
-# Reusable Auth Dependency (Guard)
-def get_current_user(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
+# Reusable Auth Dependency (Guard with Swagger UI Padlock Support)
+def get_current_user(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)):
+    if not credentials or not credentials.scheme or credentials.scheme.lower() != "bearer" or not credentials.credentials.strip():
         raise AuthException(status.HTTP_401_UNAUTHORIZED, "Access token required")
 
-    parts = auth_header.split(" ")
-    if len(parts) != 2 or not parts[1].strip():
-        raise AuthException(status.HTTP_401_UNAUTHORIZED, "Access token required")
-
-    token = parts[1].strip()
+    token = credentials.credentials.strip()
 
     try:
         user_response = supabase.auth.get_user(token)
