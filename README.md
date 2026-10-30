@@ -1,66 +1,65 @@
 ﻿# Backend AI Engineering
 
-Production-grade backend architectures, database migration layers, and containerized stacks built with Python, FastAPI, Docker, and PostgreSQL.
+Production-grade backend architectures, database migration layers, containerized stacks, and secure identity provider authentication built with Python, FastAPI, Docker, PostgreSQL, and Supabase Auth.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Repository Overview
 - **`BE-01`**: In-Memory HTTP CRUD foundations and strict REST semantics.
 - **`BE-02`**: Persistent SQLite storage with parameterized SQL queries.
-- **`BE-04`**: Multi-container stack orchestration with Docker Compose, PostgreSQL server, isolated volumes, and environment secrets.
+- **`BE-04`**: Multi-container stack orchestration with Docker Compose, PostgreSQL server, and isolated volumes.
+- **`BE-03`**: Enterprise Identity Provider (IdP) integration with Supabase Auth, JSON Web Tokens (JWT), reusable FastAPI dependencies, and route protection.
 
 ---
 
-## Module: BE-04 — Containerized PostgreSQL Stack
+## Module: BE-03 — Auth: Login & Protect
 
-### Architectural Principles
-This module migrates storage to an enterprise-grade relational database running inside an isolated Docker container, orchestrated alongside the FastAPI application via Docker Compose.
+### Architectural Principles: The Trust Triangle
+This module enforces zero-trust access control by delegating user credential storage, password hashing, and cryptographic signing to an external Identity Provider (**Supabase Auth**):
+1. **Credentials Delegation**: The client passes email and password to Supabase; our backend never stores plain passwords or hashes them manually.
+2. **Cryptographic Passes**: Supabase issues signed JSON Web Tokens (JWTs) with an expiration lifespan.
+3. **Route Interception**: Protected routes extract the bearer token from the `Authorization: Bearer <token>` header and cryptographically verify the session via `supabase.auth.get_user(token)`.
+4. **Reusable Guards**: Verification logic is encapsulated in a FastAPI `Depends(get_current_user)` dependency, securing multiple routes without code duplication.
 
-Key guarantees:
-- **Unified Execution**: The entire stack (API + Database) starts with a single command: `docker compose up`.
-- **Strict Secret Segregation**: Database credentials live solely in `.env` (gitignored), documented via `.env.example`.
-- **True Persistence**: Database state survives full stack teardowns (`docker compose down`) via Docker named volumes (`taskdata`).
-- **Unbroken Contracts**: Route signatures and HTTP status codes (`200`, `201`, `204`, `400`, `404`) remain identical across memory, SQLite, and PostgreSQL.
-
-### Quickstart (One-Command Deployment)
+### Quickstart
 
 ```powershell
 # 1. Clone repository
 git clone [https://github.com/AndruMark/backend-ai-engineering.git](https://github.com/AndruMark/backend-ai-engineering.git)
 cd backend-ai-engineering
 
-# 2. Configure environment
-Copy-Item .env.example .env
+# 2. Activate virtual environment & install dependencies
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
-# 3. Launch stack
-docker compose up -d --build
+# 3. Configure environment variables
+Copy-Item .env.example .env
+# Edit .env and supply your SUPABASE_URL and SUPABASE_KEY (anon public key)
+
+# 4. Launch API server
+uvicorn main:app --reload --port 8000
 ```
 
 ### Endpoints Specification
 
-| HTTP Method | Endpoint | Underlying SQL Operation | Status Code |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/` | API Root Metadata | `200 OK` |
-| `GET` | `/health` | Server Health Check probe | `200 OK` |
-| `GET` | `/tasks` | `SELECT id, title, done FROM tasks ORDER BY id ASC;` | `200 OK` |
-| `GET` | `/tasks/{id}` | `SELECT id, title, done FROM tasks WHERE id = %s;` | `200 OK` / `404 Not Found` |
-| `POST` | `/tasks` | `INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id, title, done;` | `201 Created` / `400 Bad Request` |
-| `PUT` | `/tasks/{id}` | `UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING id, title, done;` | `200 OK` / `400 Bad Request` / `404 Not Found` |
-| `DELETE` | `/tasks/{id}` | `DELETE FROM tasks WHERE id = %s RETURNING id;` | `204 No Content` / `404 Not Found` |
-
-### Database Inspection inside Container
-```bash
-docker compose exec db psql -U postgres -d tasks -c "SELECT * FROM tasks;"
-```
-
-![PostgreSQL Container Inspection](postgres_screenshot.png)
+| HTTP Method | Endpoint | Auth Required | Expected Status Codes | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/` | No | `200 OK` | API root metadata and discovery catalog |
+| `GET` | `/health` | No | `200 OK` | Server health check probe |
+| `POST` | `/auth/signup` | No | `201 Created` / `400 Bad Request` | Registers new user account in Supabase |
+| `POST` | `/auth/login` | No | `200 OK` / `400 Bad Request` / `401 Unauthorized` | Authenticates user & issues access/refresh tokens |
+| `POST` | `/auth/logout` | **Yes (Bearer)** | `204 No Content` / `401 Unauthorized` | Ends session via Supabase signOut |
+| `GET` | `/public/info` | No | `200 OK` | Publicly accessible information |
+| `GET` | `/protected/profile` | **Yes (Bearer)** | `200 OK` / `401 Unauthorized` | Returns verified user identity metadata |
+| `GET` | `/protected/dashboard` | **Yes (Bearer)** | `200 OK` / `401 Unauthorized` | Secondary protected view verifying guard reuse |
 
 ---
 
-## Interactive API Documentation
-Served at `http://localhost:8000/docs`.
+## Interactive API Documentation & Swagger UI
+Interactive docs available at `http://localhost:8000/docs`.  
+Authentication is integrated via the OpenAPI `HTTPBearer` security scheme.
 
-![Swagger UI Documentation](swagger_ui_screenshot.png)
+![Swagger UI Bearer Authorization](swagger_auth_screenshot.png)
 
 ---
 
@@ -74,12 +73,6 @@ Served at `http://localhost:8000/docs`.
 - Guarded database seeding with `SELECT COUNT(*) FROM tasks` to prevent duplicate seed rows across application restarts.
 - Structured database rows using `conn.row_factory = sqlite3.Row` for schema integrity.
 
-### Stage 6 (BE-04): Containerized Stack AI vs Me Benchmark
-
-#### Prompt Used:
-> "Containerize a FastAPI CRUD task API connecting to a PostgreSQL database using Docker Compose. Ensure data persists across container restarts, credentials are read securely from environment variables, the database seeds initial tasks only once on startup, and both services start together with a single command."
-
-#### Comparative Findings:
-1. **Network Host Addressing Flaw**: The AI version configured `DATABASE_URL` with `localhost:5432` inside the API container. In Docker Compose networks, inter-container communication requires resolving the service name (`db:5432`), causing immediate connection failure in the AI build.
-2. **Missing Volume Persistence**: The naive compose omitted `volumes: [taskdata:/var/lib/postgresql/data]`. As a result, running `docker compose down` and `up` wiped all database state, violating the core persistence requirement.
-3. **Absence of Dependency Readiness Probes**: The AI configuration lacked healthcheck synchronization (`depends_on: condition: service_healthy` with `pg_isready`), triggering race-condition crashes in the API before the database socket was ready to accept TCP traffic.
+### Stage 6 (BE-04): Containerized Stack AI vs Me
+- Resolved container DNS naming (`db:5432`) over broken `localhost:5432` configurations.
+- Enforced Docker named volumes (`taskdata`) for true data persistence and added `pg_isready` health checks.
