@@ -114,13 +114,11 @@ def log_in(payload: AuthCredentials):
             content={"error": "Invalid login credentials"}
         )
 
-# --- STAGE 2: PUBLIC & PROTECTED GATES ---
-
 @app.get("/public/info", tags=["Public"], summary="Open public info endpoint")
 def public_info():
     return {"message": "Welcome stranger! This info is public."}
 
-@app.get("/protected/profile", tags=["Protected"], summary="Protected user profile (unverified gate)")
+@app.get("/protected/profile", tags=["Protected"], summary="Protected user profile (verified gate)")
 def protected_profile(request: Request):
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
@@ -136,7 +134,27 @@ def protected_profile(request: Request):
             content={"error": "Access token required"}
         )
         
-    return {
-        "message": "Token format accepted. Verification will be enforced in Stage 3.",
-        "raw_token_preview": f"{parts[1][:10]}..."
-    }
+    token = parts[1].strip()
+
+    try:
+        user_response = supabase.auth.get_user(token)
+        if not user_response or not user_response.user:
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"error": "Invalid or expired token"}
+            )
+        
+        user = user_response.user
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "id": user.id,
+                "email": user.email,
+                "created_at": str(user.created_at)
+            }
+        )
+    except Exception:
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "Invalid or expired token"}
+        )
