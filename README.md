@@ -76,3 +76,13 @@ Authentication is integrated via the OpenAPI `HTTPBearer` security scheme.
 ### Stage 6 (BE-04): Containerized Stack AI vs Me
 - Resolved container DNS naming (`db:5432`) over broken `localhost:5432` configurations.
 - Enforced Docker named volumes (`taskdata`) for true data persistence and added `pg_isready` health checks.
+
+### Stage 7 (BE-03): Auth — Supabase & JWT AI vs Me Benchmark
+
+#### Prompt Used:
+> "Build a secure FastAPI backend integrating Supabase Auth as the Identity Provider. Implement POST /auth/signup, POST /auth/login, POST /auth/logout, GET /public/info, and GET /protected/profile. Protect endpoints using a reusable dependency with HTTPBearer that verifies the access token via supabase.auth.get_user(token). Enforce strict status codes (201 on signup, 200 on login/read, 204 on logout, 400 on bad input, 401 on missing or invalid/expired token) returning uniform JSON errors."
+
+#### Comparative Findings:
+1. **Fragile Header Parsing & Unhandled Exceptions**: The naive AI code relied on `authorization.split(" ")[1]` directly on the incoming header without validating length or prefix format. Any request sending `Authorization: Bearer` (without token) or a non-bearer scheme triggered an unhandled `IndexError` resulting in a `500 Internal Server Error` instead of a clean `401 Unauthorized`.
+2. **Missing Input Sanitization & Empty String Exploits**: The generated signup/login routes checked dictionary key presence but omitted `.strip()` validation. Strings containing only whitespace bypassed checks and triggered unexpected downstream provider errors instead of an immediate `400 Bad Request`.
+3. **Swagger UI OpenAPI Disconnect**: The AI implementation used raw `Header(None)` instead of FastAPI's `HTTPBearer` security scheme. While functional via cURL, this failed to activate the interactive "Authorize" padlock in Swagger UI (`/docs`), preventing token testing from the browser.
