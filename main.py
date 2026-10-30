@@ -1,7 +1,7 @@
 ﻿import os
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -113,3 +113,30 @@ def log_in(payload: AuthCredentials):
             status_code=status.HTTP_401_UNAUTHORIZED,
             content={"error": "Invalid login credentials"}
         )
+
+# --- STAGE 2: PUBLIC & PROTECTED GATES ---
+
+@app.get("/public/info", tags=["Public"], summary="Open public info endpoint")
+def public_info():
+    return {"message": "Welcome stranger! This info is public."}
+
+@app.get("/protected/profile", tags=["Protected"], summary="Protected user profile (unverified gate)")
+def protected_profile(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "Access token required"}
+        )
+    
+    parts = auth_header.split(" ")
+    if len(parts) != 2 or not parts[1].strip():
+        return JSONResponse(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            content={"error": "Access token required"}
+        )
+        
+    return {
+        "message": "Token format accepted. Verification will be enforced in Stage 3.",
+        "raw_token_preview": f"{parts[1][:10]}..."
+    }
