@@ -2,11 +2,14 @@
 import sys
 import time
 import json
+import re
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timezone
+from typing import Optional
 import requests
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, Field, field_validator
 
 # Base configuration & Politeness headers
 BASE_URL = "https://books.toscrape.com/"
@@ -23,11 +26,37 @@ OUTPUT_DIR = PROJECT_ROOT / "output"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+class BookRecord(BaseModel):
+    """
+    Strict validation schema for normalized book records.
+    """
+    title: str = Field(min_length=1)
+    product_url: str
+    price_text: str = Field(min_length=1)
+    price_gbp: float = Field(ge=0.0)
+    availability_text: str = Field(min_length=1)
+    rating_text: str = Field(min_length=1)
+    description: Optional[str] = None
+    source_page: str
+    fetched_at: str
+
+    @field_validator("product_url", "source_page")
+    @classmethod
+    def validate_absolute_url(cls, v: str) -> str:
+        if not v.startswith("https://"):
+            raise ValueError(f"URL must be absolute and use HTTPS: {v}")
+        return v
+
+def clean_price_gbp(price_text: str) -> float:
+    """
+    Extracts numeric float from messy currency strings (e.g. '£51.77' or 'Â£51.77').
+    """
+    match = re.search(r"(\d+(?:\.\d+)?)", price_text)
+    if not match:
+        raise ValueError(f"No numeric price found in: {price_text}")
+    return float(match.group(1))
+
 def fetch_page(url: str, cache_name: str) -> tuple[str, bool]:
-    """
-    Polite fetcher with local disk cache:
-    Returns (html_content, from_cache: bool).
-    """
     cache_path = CACHE_DIR / cache_name
 
     if cache_path.exists():
@@ -88,7 +117,6 @@ def discover_book_items(max_pages: int = 3) -> list[dict]:
         else:
             current_url = None
 
-    print(f"catalogue_pages = {pages_crawled}, discovered = {len(discovered_items)}, unique_urls = {len(seen_urls)}")
     return discovered_items
 
 def parse_book_detail(html_content: str, product_url: str, source_page: str) -> dict:
@@ -97,29 +125,23 @@ def parse_book_detail(html_content: str, product_url: str, source_page: str) -> 
     if not product_article:
         raise ValueError(f"Product page container not found for {product_url}")
 
-    # 1. Title
     title_tag = product_article.select_one("div.product_main h1")
     title = title_tag.get_text(strip=True) if title_tag else ""
 
-    # 2. Raw price
     price_tag = product_article.select_one("div.product_main p.price_color")
     price_text = price_tag.get_text(strip=True) if price_tag else ""
 
-    # 3. Raw availability
     avail_tag = product_article.select_one("div.product_main p.instock.availability")
     availability_text = " ".join(avail_tag.get_text().split()) if avail_tag else ""
 
-    # 4. Rating text
     rating_tag = product_article.select_one("p.star-rating")
     rating_text = "Zero"
     if rating_tag:
-        classes = rating_tag.get("class", [])
-        for c in classes:
+        for c in rating_tag.get("class", []):
             if c != "star-rating":
                 rating_text = c
                 break
 
-    # 5. Description (null if missing)
     desc_header = product_article.select_one("#product_description")
     description = None
     if desc_header:
@@ -141,9 +163,11 @@ def parse_book_detail(html_content: str, product_url: str, source_page: str) -> 
         "fetched_at": fetched_at
     }
 
-def extract_all_books(max_pages: int = 3) -> list[dict]:
+def process_pipeline(max_pages: int = 3) -> tuple[list[dict], list[dict]]:
     items = discover_book_items(max_pages=max_pages)
-    raw_records: list[dict] = []
+    valid_records: list[dict] = []
+    error_records: list[dict] = []
+    seen_canonical_urls: set[str] = set()
     total = len(items)
 
     for idx, item in enumerate(items, start=1):
@@ -153,24 +177,45 @@ def extract_all_books(max_pages: int = 3) -> list[dict]:
         cache_name = f"book-{slug}.html"
 
         html, from_cache = fetch_page(url, cache_name)
-        status_label = "CACHE" if from_cache else "FETCH"
-        print(f"[{idx:02d}/{total:02d}] {status_label}: {slug}")
-
         if not from_cache:
             time.sleep(POLITE_DELAY)
 
-        record = parse_book_detail(html, product_url=url, source_page=item["source_page"])
-        raw_records.append(record)
+        try:
+            raw_record = parse_book_detail(html, product_url=url, source_page=item["source_page"])
+            
+            # Normalization
+            raw_record["price_gbp"] = clean_price_gbp(raw_record["price_text"])
 
-    return raw_records
+            # Schema Validation
+            validated = BookRecord(**raw_record)
+            record_dict = validated.model_dump()
+
+            # Canonical deduplication
+            if record_dict["product_url"] not in seen_canonical_urls:
+                seen_canonical_urls.add(record_dict["product_url"])
+                valid_records.append(record_dict)
+
+        except Exception as exc:
+            error_records.append({
+                "product_url": url,
+                "error": str(exc),
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            })
+
+    # Save outputs idempotently
+    books_file = OUTPUT_DIR / "books.json"
+    errors_file = OUTPUT_DIR / "errors.json"
+
+    books_file.write_text(json.dumps(valid_records, indent=2, ensure_ascii=False), encoding="utf-8")
+    errors_file.write_text(json.dumps(error_records, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return valid_records, error_records
 
 def main():
-    print("--- Stage 3: Extract book details ---")
-    records = extract_all_books(max_pages=3)
-    print(f"\ndetail_pages = {len(records)}")
-    if records:
-        print("\nSample raw record (all 8 keys):")
-        print(json.dumps(records[0], indent=2, ensure_ascii=False))
+    print("--- Stage 4: Clean it, check it, store it ---")
+    valid, errors = process_pipeline(max_pages=3)
+    print(f"Validated records stored: {len(valid)}")
+    print(f"Rejected records stored: {len(errors)}")
 
 if __name__ == "__main__":
     main()
