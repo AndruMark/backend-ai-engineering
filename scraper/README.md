@@ -80,3 +80,17 @@ JSON
 Pagination Limit: The crawler currently relies on following pagination sequentially up to max_pages=3 rather than dynamic breadth-first crawling across the entire catalogue.
 
 Fixed Selectors: Selectors assume the current DOM layout of books.toscrape.com; breaking markup changes would require selector updates.
+
+---
+
+## 7. Bonus Stage: AI vs Me (Rematch Benchmark)
+
+### Prompt Provided to the Autonomous AI
+> "Build a Python web scraper for books.toscrape.com that collects all 60 books across the first three catalogue pages and writes them to books.json with their title, canonical URL, raw price, numeric price in GBP, availability, rating, and description. Implement local disk caching, an honest User-Agent, at least 500ms delay between live requests, 10s timeouts, Pydantic schema validation, quarantine for malformed records in errors.json, fault tolerance that retries 5xx/timeouts but skips 404s without crashing, and a final run-report.json telemetry summary."
+
+### Comparative Analysis & 3 Concrete Architectural Discrepancies
+Comparing the quarantined autonomous implementation in `scraper/ai-version/scraper.ai.py` against the production pipeline in `scraper/src/main.py` revealed three major vulnerabilities:
+
+1. **Zero Throttling & Server Hammering (Politeness Violation)**: The AI script executed 60 detail requests in rapid back-to-back succession without `time.sleep()`. On production servers or protected endpoints, this triggers immediate IP rate-limiting, WAF blocks, or 429 Too Many Requests responses. The production pipeline guarantees at least 500 ms delay between real network requests.
+2. **Missing Local Disk Cache Architecture**: The AI version lacked any disk caching mechanism, re-fetching all catalogue and detail pages on every single run. The production implementation uses `cache/` (`catalogue-page-*.html` and `book-*.html`), enabling sub-second idempotent re-runs and saving server bandwidth.
+3. **Fragile DOM Extraction & Schema Absence**: The AI version did not use Pydantic or schema validation. It extracted raw string tuples and risked `AttributeError` crashes on missing description tags. The production pipeline normalizes currency strings (`£51.77` -> `51.77`), validates data types via Pydantic (`BookRecord`), isolates failing rows to `errors.json`, and records full data provenance (`source_page` and `fetched_at`).
