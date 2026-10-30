@@ -7,3 +7,9 @@ ai-version/
 .pytest_cache/
 
 tasks.db
+
+# Web Scraper cache and temporary outputs
+scraper/cache/
+cache/
+output/
+scraper/output/
