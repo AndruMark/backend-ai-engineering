@@ -1,0 +1,7 @@
+[
+  {
+    "product_url": "https://books.toscrape.com/catalogue/fake-broken-book_9999/index.html",
+    "error": "Client error 404 for https://books.toscrape.com/catalogue/fake-broken-book_9999/index.html - skipping without retry",
+    "timestamp": "2026-10-30T19:49:14Z"
+  }
+]

@@ -1,15 +1,25 @@
-﻿.venv/
+﻿# Virtual Environment
+.venv/
+venv/
+ENV/
+
+# Python cache
 __pycache__/
 *.pyc
+
+# Environment secrets
 .env
+
+# Database files
+*.db
+*.sqlite3
+
+# Docker local data
+taskdata/
+
+# Quarantined AI code (force-added explicitly with git add -f)
 ai-version/
-*.log
-.pytest_cache/
 
-tasks.db
-
-# Web Scraper cache and temporary outputs
+# Scraper local cache (DO NOT COMMIT RAW HTML CACHE)
 scraper/cache/
 cache/
-output/
-scraper/output/
