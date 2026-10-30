@@ -1,151 +1,38 @@
 ﻿import os
-import psycopg
-from psycopg.rows import dict_row
-from fastapi import FastAPI, Response, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from supabase import create_client, Client
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:dev@localhost:5432/tasks")
+load_dotenv()
 
-def get_db_connection():
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
 
-def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id SERIAL PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    done BOOLEAN NOT NULL DEFAULT FALSE
-                );
-            """)
-            cur.execute("SELECT COUNT(*) AS count FROM tasks;")
-            row = cur.fetchone()
-            if row["count"] == 0:
-                cur.executemany(
-                    "INSERT INTO tasks (title, done) VALUES (%s, %s);",
-                    [
-                        ("Setup development environment with Scoop and Python", True),
-                        ("Build CRUD endpoints with FastAPI", False),
-                        ("Test endpoints via Swagger UI and cURL", False)
-                    ]
-                )
-            conn.commit()
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise RuntimeError("SUPABASE_URL and SUPABASE_KEY must be configured in environment variables.")
 
-init_db()
+# Supabase Auth Client Initialization
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(
-    title="Task API",
-    description="Containerized PostgreSQL Task Management API — Backend AI Engineering Track",
-    version="3.0"
+    title="Auth & Task API",
+    description="Identity Provider Authentication (Supabase Auth) & Route Protection — Backend AI Engineering Track",
+    version="4.0"
 )
 
-class TaskCreate(BaseModel):
-    title: str = Field(..., min_length=1, description="Task title cannot be empty")
-
-class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(None, min_length=1, description="Task title")
-    done: Optional[bool] = Field(None, description="Completion status")
-
-class TaskResponse(BaseModel):
-    id: int
-    title: str
-    done: bool
+@app.on_event("startup")
+def startup_event():
+    print("Server running and connected to Supabase Auth client.")
 
 @app.get("/", tags=["System"], summary="API Root Metadata")
 def read_root():
     return {
-        "name": "Task API",
-        "version": "3.0",
-        "storage": "PostgreSQL",
-        "endpoints": ["/tasks", "/tasks/{id}", "/health", "/docs"]
+        "name": "Auth API",
+        "version": "4.0",
+        "auth_provider": "Supabase Auth",
+        "endpoints": ["/auth/signup", "/auth/login", "/auth/logout", "/protected/profile", "/public/info", "/docs"]
     }
 
 @app.get("/health", tags=["System"], summary="Server Health Check")
 def health_check():
-    return {"status": "ok"}
-
-@app.get("/tasks", response_model=List[TaskResponse], tags=["Tasks"], summary="Get all tasks")
-def get_all_tasks():
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, title, done FROM tasks ORDER BY id ASC;")
-            return cur.fetchall()
-
-@app.get("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Get task by ID")
-def get_task(task_id: int):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
-            row = cur.fetchone()
-            if not row:
-                return JSONResponse(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    content={"error": "Task not found"}
-                )
-            return row
-
-@app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"], summary="Create a new task")
-def create_task(payload: TaskCreate):
-    cleaned_title = payload.title.strip()
-    if not cleaned_title:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": "Title is required and cannot be empty"}
-        )
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id, title, done;",
-                (cleaned_title, False)
-            )
-            conn.commit()
-            return JSONResponse(status_code=status.HTTP_201_CREATED, content=cur.fetchone())
-
-@app.put("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Update task")
-def update_task(task_id: int, payload: TaskUpdate):
-    if payload.title is None and payload.done is None:
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": "Request body must include 'title' or 'done'"}
-        )
-    cleaned_title = None
-    if payload.title is not None:
-        cleaned_title = payload.title.strip()
-        if not cleaned_title:
-            return JSONResponse(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                content={"error": "Title cannot be empty"}
-            )
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
-            row = cur.fetchone()
-            if not row:
-                return JSONResponse(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    content={"error": f"Task {task_id} not found"}
-                )
-            new_title = cleaned_title if cleaned_title is not None else row["title"]
-            new_done = payload.done if payload.done is not None else row["done"]
-            cur.execute(
-                "UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING id, title, done;",
-                (new_title, new_done, task_id)
-            )
-            conn.commit()
-            return cur.fetchone()
-
-@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"], summary="Delete task")
-def delete_task(task_id: int):
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM tasks WHERE id = %s RETURNING id;", (task_id,))
-            conn.commit()
-            if not cur.fetchone():
-                return JSONResponse(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    content={"error": f"Task {task_id} not found"}
-                )
-            return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return {"status": "ok", "supabase": "connected"}
