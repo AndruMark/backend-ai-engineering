@@ -42,6 +42,13 @@ app = FastAPI(
     version="3.0"
 )
 
+class TaskCreate(BaseModel):
+    title: str = Field(..., min_length=1, description="Task title cannot be empty")
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, description="Task title")
+    done: Optional[bool] = Field(None, description="Completion status")
+
 class TaskResponse(BaseModel):
     id: int
     title: str
@@ -79,3 +86,66 @@ def get_task(task_id: int):
                     content={"error": "Task not found"}
                 )
             return row
+
+@app.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED, tags=["Tasks"], summary="Create a new task")
+def create_task(payload: TaskCreate):
+    cleaned_title = payload.title.strip()
+    if not cleaned_title:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Title is required and cannot be empty"}
+        )
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING id, title, done;",
+                (cleaned_title, False)
+            )
+            conn.commit()
+            return JSONResponse(status_code=status.HTTP_201_CREATED, content=cur.fetchone())
+
+@app.put("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Update task")
+def update_task(task_id: int, payload: TaskUpdate):
+    if payload.title is None and payload.done is None:
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": "Request body must include 'title' or 'done'"}
+        )
+    cleaned_title = None
+    if payload.title is not None:
+        cleaned_title = payload.title.strip()
+        if not cleaned_title:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"error": "Title cannot be empty"}
+            )
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": f"Task {task_id} not found"}
+                )
+            new_title = cleaned_title if cleaned_title is not None else row["title"]
+            new_done = payload.done if payload.done is not None else row["done"]
+            cur.execute(
+                "UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING id, title, done;",
+                (new_title, new_done, task_id)
+            )
+            conn.commit()
+            return cur.fetchone()
+
+@app.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["Tasks"], summary="Delete task")
+def delete_task(task_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM tasks WHERE id = %s RETURNING id;", (task_id,))
+            conn.commit()
+            if not cur.fetchone():
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": f"Task {task_id} not found"}
+                )
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
