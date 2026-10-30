@@ -1,0 +1,13 @@
+﻿# Naive AI Compose implementation:
+# Issues: hardcodes credentials, misses health checks, and omits named volumes for data persistence
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@localhost:5432/tasks
+  db:
+    image: postgres:latest
+    environment:
+      - POSTGRES_PASSWORD=password

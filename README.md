@@ -73,3 +73,13 @@ Served at `http://localhost:8000/docs`.
 ### Stage 6 (BE-02): SQLite Persistence AI vs Me
 - Guarded database seeding with `SELECT COUNT(*) FROM tasks` to prevent duplicate seed rows across application restarts.
 - Structured database rows using `conn.row_factory = sqlite3.Row` for schema integrity.
+
+### Stage 6 (BE-04): Containerized Stack AI vs Me Benchmark
+
+#### Prompt Used:
+> "Containerize a FastAPI CRUD task API connecting to a PostgreSQL database using Docker Compose. Ensure data persists across container restarts, credentials are read securely from environment variables, the database seeds initial tasks only once on startup, and both services start together with a single command."
+
+#### Comparative Findings:
+1. **Network Host Addressing Flaw**: The AI version configured `DATABASE_URL` with `localhost:5432` inside the API container. In Docker Compose networks, inter-container communication requires resolving the service name (`db:5432`), causing immediate connection failure in the AI build.
+2. **Missing Volume Persistence**: The naive compose omitted `volumes: [taskdata:/var/lib/postgresql/data]`. As a result, running `docker compose down` and `up` wiped all database state, violating the core persistence requirement.
+3. **Absence of Dependency Readiness Probes**: The AI configuration lacked healthcheck synchronization (`depends_on: condition: service_healthy` with `pg_isready`), triggering race-condition crashes in the API before the database socket was ready to accept TCP traffic.
