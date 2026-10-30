@@ -42,6 +42,11 @@ app = FastAPI(
     version="3.0"
 )
 
+class TaskResponse(BaseModel):
+    id: int
+    title: str
+    done: bool
+
 @app.get("/", tags=["System"], summary="API Root Metadata")
 def read_root():
     return {
@@ -54,3 +59,23 @@ def read_root():
 @app.get("/health", tags=["System"], summary="Server Health Check")
 def health_check():
     return {"status": "ok"}
+
+@app.get("/tasks", response_model=List[TaskResponse], tags=["Tasks"], summary="Get all tasks")
+def get_all_tasks():
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks ORDER BY id ASC;")
+            return cur.fetchall()
+
+@app.get("/tasks/{task_id}", response_model=TaskResponse, tags=["Tasks"], summary="Get task by ID")
+def get_task(task_id: int):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, title, done FROM tasks WHERE id = %s;", (task_id,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    content={"error": "Task not found"}
+                )
+            return row
