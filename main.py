@@ -1,7 +1,7 @@
 ﻿import os
 from typing import Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -23,6 +23,41 @@ app = FastAPI(
     version="4.0"
 )
 
+# Custom Exception for Uniform Auth Errors
+class AuthException(Exception):
+    def __init__(self, status_code: int, error: str):
+        self.status_code = status_code
+        self.error = error
+
+@app.exception_handler(AuthException)
+def auth_exception_handler(request: Request, exc: AuthException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.error}
+    )
+
+# Reusable Auth Dependency (Guard)
+def get_current_user(request: Request):
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise AuthException(status.HTTP_401_UNAUTHORIZED, "Access token required")
+
+    parts = auth_header.split(" ")
+    if len(parts) != 2 or not parts[1].strip():
+        raise AuthException(status.HTTP_401_UNAUTHORIZED, "Access token required")
+
+    token = parts[1].strip()
+
+    try:
+        user_response = supabase.auth.get_user(token)
+        if not user_response or not user_response.user:
+            raise AuthException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+        return {"user": user_response.user, "token": token}
+    except AuthException:
+        raise
+    except Exception:
+        raise AuthException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
+
 class AuthCredentials(BaseModel):
     email: Optional[str] = None
     password: Optional[str] = None
@@ -33,7 +68,7 @@ def read_root():
         "name": "Auth API",
         "version": "4.0",
         "auth_provider": "Supabase Auth",
-        "endpoints": ["/auth/signup", "/auth/login", "/auth/logout", "/protected/profile", "/public/info", "/docs"]
+        "endpoints": ["/auth/signup", "/auth/login", "/auth/logout", "/protected/profile", "/protected/dashboard", "/public/info", "/docs"]
     }
 
 @app.get("/health", tags=["System"], summary="Server Health Check")
@@ -47,7 +82,7 @@ def sign_up(payload: AuthCredentials):
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"error": "Email and password are required"}
         )
-    
+
     clean_email = payload.email.strip()
     clean_password = payload.password.strip()
 
@@ -114,47 +149,32 @@ def log_in(payload: AuthCredentials):
             content={"error": "Invalid login credentials"}
         )
 
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, tags=["Auth"], summary="Log out user session")
+def log_out(current_auth: dict = Depends(get_current_user)):
+    try:
+        supabase.auth.sign_out()
+    except Exception:
+        pass
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 @app.get("/public/info", tags=["Public"], summary="Open public info endpoint")
 def public_info():
     return {"message": "Welcome stranger! This info is public."}
 
-@app.get("/protected/profile", tags=["Protected"], summary="Protected user profile (verified gate)")
-def protected_profile(request: Request):
-    auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"error": "Access token required"}
-        )
-    
-    parts = auth_header.split(" ")
-    if len(parts) != 2 or not parts[1].strip():
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"error": "Access token required"}
-        )
-        
-    token = parts[1].strip()
+@app.get("/protected/profile", tags=["Protected"], summary="Protected user profile")
+def protected_profile(current_auth: dict = Depends(get_current_user)):
+    user = current_auth["user"]
+    return {
+        "id": user.id,
+        "email": user.email,
+        "created_at": str(user.created_at)
+    }
 
-    try:
-        user_response = supabase.auth.get_user(token)
-        if not user_response or not user_response.user:
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"error": "Invalid or expired token"}
-            )
-        
-        user = user_response.user
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "id": user.id,
-                "email": user.email,
-                "created_at": str(user.created_at)
-            }
-        )
-    except Exception:
-        return JSONResponse(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            content={"error": "Invalid or expired token"}
-        )
+@app.get("/protected/dashboard", tags=["Protected"], summary="Protected user dashboard")
+def protected_dashboard(current_auth: dict = Depends(get_current_user)):
+    user = current_auth["user"]
+    return {
+        "message": f"Welcome to your private dashboard, {user.email}!",
+        "user_id": user.id,
+        "status": "authenticated"
+    }
